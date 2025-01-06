@@ -1,0 +1,272 @@
+Update 06 Feb 2023
+==================
+
+Request by Bu Maya 
+    Change Date generate Journal from Process Staging Data, from Repayment Date/Delivery Date to Process Date (Current Date) - Status Applied at Production
+
+
+Update 26 Apr 2023
+==================
+Add Field Overpayment to Staging Data because at Portico Data will provide Overpayment Amount separately
+Change Calculation Formula for R25 Overpayment
+
+
+TRANSITION TO ADD NEW TRANSACTION TYPE (OVERPAYMENT & REFUND)
+=============================================================
+Update 19 June 2023
+===================
+
+mandatory field for Overpayment (same as Repayment)
+
+mandatory field for Refund
+    transaction_type
+    delivery_date                   v   -> as mapping collection bank if needed
+    lender                          v
+    loan_id                         v
+    supplier_transfer               v   -> default to T+0
+    refund                          v
+
+    amount_to_finance               x
+    interest_fee                    x
+    loan_amount                     x
+    repayment_amount_expected       x
+    interest_rate                   x
+    supplier_transfer               x
+
+Change Scripts !
+================
+sti_modul.js
+    getStagingData()
+        Add new return data (overpayment & refund)
+    calculateCode()
+        Add new return data (R28 - R28_Refund from field Refund staging data)
+    searchDataNeedToProcess()
+        Add Condition for Refund - Need To Process
+    getTransactionDate()
+        Add Condition for Refund - return transaction date
+    getIdTransaction()
+        Add Condition for Refund
+    getSourceMappingValue()
+        Add Condition for mapping R28 code
+    createCalculateRecord()
+        Add SetValue for R28_Refund
+
+
+PRODUCTION
+==========
+1. Add overpayment (custrecord_sti_overpayment) field at Staging Data
+2. Add Refund (custrecord_sti_refund) field at Staging Data
+3. Add refund as New Transaction Type
+4. Add Refund New Custom Transaction (customtransaction_sti_refund) -> Dont Forget set Status Posting YES
+5. Add Parent Record Template Type with Template Journal Record
+6. Add Field R28 Refund (custrecord_sti_cf_r28) at Calculation Formula Record 
+
+
+Rerun Staging Data Flow Check
+=============================
+sti_sl_process_staging_data.js
+    show list staging data with any status (need to process, error and completed)
+    if (status need to process)
+        if (any selected staging)
+            sti_sch_bg_process_staging_data.js
+                summary selected data and create bg process for staging data process, cont. to run next sch
+                    sti_sch_staging_data_single_process.js
+                        update bg_process to In_Progress
+                        sti_modul.getStagingData() -> return object StagingData
+                        sti_modul.getLenderInformation() -> return object Lender Information
+                        sti_modul.getTransactionType() -> return object id_transaction_type
+                        sti_modul.validationData() -> do validation Staging Data, and return error if any
+                            validationTransType()
+                            validationLender()
+                                checkLender()
+                                    lender cannot be empty
+                                lender_type and lender_pph_tax_account
+                            validationDetail()
+                                loan_id cannot empty
+                                amount_to_finance cannot be NaN
+                                interest_fee cannot be NaN
+                                if (transaction_type is discount)
+                                    discount cannot be NaN
+                                if (transaction_type is cashback)
+                                    cashback cannot be NaN
+                                loan_amount cannot be NaN
+                                repayment_amount_expected cannot be NaN
+                                if (transaction_type is repayment)
+                                    repayment_date cannot be empty
+                                        repayment_date must have validation format and in accounting_period
+                                    paid_amount cannot be NaN
+                                    due_date_lender cannot be empty
+                                        due_date_lender must have validation format and in accounting_period
+                                if (transaction_type is latefee)
+                                    late_fee cannot be NaN
+                                    waive_fee cannot be NaN
+                                    getRepaymentInfo()
+                                        getRepaymentInfo().collection_bank cannot be empty
+                                        getRepaymentInfo().collection_type cannot be empty
+                                interest_rate cannot be NaN
+                                validationSupplierTransferFormat()
+                                if (transaction_type is NOT repayment)
+                                    delivery_date cannot be empty
+                                        delivery_date must have validation format and in accounting_period
+                                if (transaction_type is repayment)
+                                    getAccCollectionBank() cannot be empty
+                        if NO_ERROR_VALIDATION
+                            if (dataStaging.template_type not empty)
+                                runProcessWithTemplateId()
+                            else
+                                getTemplateTypeByCondition()
+                                    if (id_transaction_type == 2) -> id for repayment
+                                        countRepaymentByLoanID() == 0 ? first_repayment = true
+                                        findSuitableTemplateType01()
+                                            if (data.subsidiary & data.transaction_type & data.lender_type & data.supplier_transfer & data.firstPayment == suitable)
+                                                return id_template
+                                            else
+                                                findSuitableTemplateType02()
+                                                    if (data.subsidiary & data.transaction_type & data.lender_type & data.supplier_transfer == suitable)
+                                                        return id_template
+                                                    else
+                                                        findSuitableTemplateType03()
+                                                            if (data.subsidiary & data.transaction_type & data.lender_type == suitable)
+                                                                return id_template
+                                if (id_template > 0)
+                                    runProcessWithTemplateId()
+                                        updateBGProcess() -> update template_id
+                                        calculateCode()
+                                        if createCalculateRecord()
+                                            updateBGProcess() -> update BG for id_calculate_formula
+                                            if getTemplateJournal() > 0
+                                                runTemplateJournal()
+                                                    getTransactionDate()
+                                                    createJE
+                                                        set subsidiary
+                                                        set trandate
+                                                        set transaction_type
+                                                        set related_staging_data
+                                                        set calculation_formula
+                                                        set template_type
+                                                    if (template_journal > 0)
+                                                        loop
+                                                            setJournalLine()
+                                                    if (difference > 0)
+                                                        setJournalLine() for balanced
+                                                if id_journal created 
+                                                    updateBGProcess() -> update id_journal
+                                                    updateCalculationFormula() -> update id_journal at calculation record
+                                                    getTemplateTypeInformation()
+                                                        if (getTemplateTypeInformation().run_another_journal)
+                                                            if getTemplateJournal() > 0
+                                                                runTemplateJournal()
+                                                                    getTransactionDate()
+                                                                    createJE
+                                                                        set subsidiary
+                                                                        set trandate
+                                                                        set transaction_type
+                                                                        set related_staging_data
+                                                                        set calculation_formula
+                                                                        set template_type
+                                                                    if (template_journal > 0)
+                                                                        loop
+                                                                            setJournalLine()
+                                                                    if (difference > 0)
+                                                                        setJournalLine() for balanced
+
+
+Update 7 July 2023
+==================
+1. Update function getRepaymentInfo
+    Add Condition sorting data by DESC created_date
+
+
+
+Update 23 March 2024 | Req by Bu Maya
+=====================================
+code : sti_modul/getStagingData
+1. Change lender_interest_rate from by transaction_date to delivery_date
+2. Change lender_penalty_rate from by transaction_date to due_date_lender
+
+
+Update 06 May 2024
+==================
+code : sti_modul/calculateCode
+Add Variable
+    var B13_Lender_Interest_Net = 0;
+	var B14_WHT_Lender = 0;	
+
+
+Update 09 May 2024
+==================
+code : sti_modul/getBiayaKeterlambatanLenderV2
+Formula G9 change
+    =IF(VLOOKUP(T2,$T$9:$X$15,2,0)="Executing",0,IF(E9>=30,30*F9*(E2+D9),E9*F9*(E2+D9)))
+    E9 = Late Day
+    F9 = Bunga Keterlambatan Lender
+    E2 = Amount to Finance  -> datastaging.amount_to_finance -> B05_Principal_Amount
+    D9 = Interest to Lender -> B04_Lender_Interest_Amount
+
+
+Update 13 Mei 2024
+==================
+code : sti_modul/getBiayaKeterlambatanLenderV2
+Change calculation lateday
+    if repayment_date > (due_date_lender + grace_period)
+        lateday = repayment_date - due_date_lender
+
+
+=========================
+Draft - As of 06 Jan 2025
+=========================
+Issue
+=====
+When process Repayment for Lender PT Bank SMBC Indonesia Tbk, Lender Interest Amount is 0
+
+Solution
+========
+Previous reference date
+    PPN Rate                = current_date
+    Lender Interest Rate    = delivery_date
+    Lender Penalty Rate     = if trans_type = latefee by due_date_lender
+    Grace Period            = current_date
+    Lender PPH Tax Rate     = current_date
+
+Add custom list > Parameter Date - customlist_sti_param_date
+    1. Current Date
+    2. Delivery Date
+    3. Repayment Date
+
+Add modul to set reference date as parameter at General Preference
+    Add script param_global_staging.js as holder custom Preference
+        * Date PPN Rate               custscript_param_date_ppn_rate
+        * Date Lender Interest Rate   custscript_param_date_lender_int_rate
+        * Date Lender PPH Tax Rate    custscript_param_date_lender_pphtax_rate
+        * Date Grace Period           custscript_param_date_grace_period
+    Add function mappingParamDate() at sti_modul
+    Modify mapping reference date
+
+        var date_ppn_rate = mappingParamDate(PARAM_DATE.ppn_rate, map_param_date);
+		var ppn_rate = getEffectivePPNRate(date_ppn_rate);
+
+		var date_lender_interest_rate = mappingParamDate(PARAM_DATE.lender_interest_rate, map_param_date);
+		var lender_interest_rate = getEffectiveLenderInterestRate(id_lender, date_lender_interest_rate);
+
+        var date_lender_grace_period = mappingParamDate(PARAM_DATE.grace_period, map_param_date);
+		var lender_grace_period = getEffectiveLenderGracePeriod(id_lender, date_lender_grace_period);
+
+		var date_lender_pph_tax_rate = mappingParamDate(PARAM_DATE.lender_pph_tax_rate, map_param_date);
+		var lender_pph_tax_rate = getEffectiveLenderPPHTaxRate(id_lender, date_lender_pph_tax_rate);
+
+Deployment Checklist
+No  Task                                                Sandbox     Production
+1. Add custom list Parameter Date                       05-Jan-25   06-Jan-2025
+2. Add and Deploy Script param_global_staging.js        05-Jan-25   06-Jan-2025
+3. Setting Custom Preference > Parameter Date           05-Jan-25   06-Jan-2025
+    a. Date PPN Rate                : Current Date
+    b. Date Lender Interest Rate    : Delivery Date
+    c. Date Lender PPH Tax Rate     : Current Date
+    d. Date Grace Period            : Current Date
+4. Update Script sti_modul.js                           05-Jan-25                       
+
+    
+
+
+
+

@@ -29,6 +29,13 @@ define(['N/search',
 		name: 'custscript_sti_difference_account'
 	});
 
+	var PARAM_DATE = {
+		'ppn_rate' : runtime.getCurrentScript().getParameter({name: 'custscript_param_date_ppn_rate'}),
+		'lender_interest_rate' : runtime.getCurrentScript().getParameter({name: 'custscript_param_date_lender_int_rate'}),
+		'lender_pph_tax_rate' : runtime.getCurrentScript().getParameter({name: 'custscript_param_date_lender_pphtax_rate'}),
+		'grace_period' : runtime.getCurrentScript().getParameter({name: 'custscript_param_date_grace_period'}),
+	}
+
 
 	function createBGProcess(id_staging_data) {
 
@@ -1206,6 +1213,13 @@ define(['N/search',
 		var delivery_date = data.getValue('custrecord_sti_delivery_date');
 		var repayment_date = data.getValue('custrecord_sti_repayment_date');
 
+		// Add 05 Jan 2025 > for maintain reference date based on custom preference
+		var map_param_date = {
+			'current_date' : getToday_ASIA_BANGKOK(),
+			'delivery_date' : delivery_date,
+			'repayment_date' : repayment_date
+		}
+
 		// Find Collection Bank
 		var collection_bank = data.getValue('custrecord_sti_collection_bank');
 		var collection_type = data.getValue('custrecord_sti_collection_type');
@@ -1244,8 +1258,11 @@ define(['N/search',
 		log.debug('repayment_date ' + typeof repayment_date, repayment_date);
 		log.debug('transaction_date ' + typeof transaction_date, transaction_date);
 
-		var ppn_rate = getEffectivePPNRate(transaction_date);
-		var lender_interest_rate = getEffectiveLenderInterestRate(id_lender, delivery_date);
+		var date_ppn_rate = mappingParamDate(PARAM_DATE.ppn_rate, map_param_date);
+		var ppn_rate = getEffectivePPNRate(date_ppn_rate);
+
+		var date_lender_interest_rate = mappingParamDate(PARAM_DATE.lender_interest_rate, map_param_date);
+		var lender_interest_rate = getEffectiveLenderInterestRate(id_lender, date_lender_interest_rate);
 
 		var lender_penalty_rate = 0;
 		
@@ -1257,8 +1274,11 @@ define(['N/search',
 			lender_penalty_rate = getEffectiveLenderPenaltyRate(id_lender, data_repayment.due_date_lender);
 		}
 		
-		var lender_grace_period = getEffectiveLenderGracePeriod(id_lender, transaction_date);
-		var lender_pph_tax_rate = getEffectiveLenderPPHTaxRate(id_lender, transaction_date);
+		var date_lender_grace_period = mappingParamDate(PARAM_DATE.grace_period, map_param_date);
+		var lender_grace_period = getEffectiveLenderGracePeriod(id_lender, date_lender_grace_period);
+
+		var date_lender_pph_tax_rate = mappingParamDate(PARAM_DATE.lender_pph_tax_rate, map_param_date);
+		var lender_pph_tax_rate = getEffectiveLenderPPHTaxRate(id_lender, date_lender_pph_tax_rate);
 
 		/*
 			#Update 23 March 2024 | Req by Bu Maya
@@ -4268,6 +4288,33 @@ define(['N/search',
 		});
 	}
 
+	function mappingParamDate(param, mapping){
+
+		log.debug("mappingParamDate "+typeof param, param);
+		log.debug("mapping "+typeof mapping, mapping);
+
+		var date = "";
+
+		switch (parseInt(param)) {
+			case 1:
+				date = mapping.current_date;
+				break;
+			case 2:
+				date = mapping.delivery_date;
+				break;
+			case 3:
+				date = mapping.repayment_date;
+				break;
+			default:
+				break;
+		}
+
+		log.debug("date "+typeof date, date);
+
+
+		return date;
+	}
+
 
 	return {
 		createBGProcess: createBGProcess,
@@ -4310,6 +4357,7 @@ define(['N/search',
 		getEffectiveLenderGracePeriod: getEffectiveLenderGracePeriod,
 		getEffectiveLenderPPHTaxRate: getEffectiveLenderPPHTaxRate,
 		getToday_ASIA_BANGKOK: getToday_ASIA_BANGKOK,
-		checkRelatedJournalStagingData: checkRelatedJournalStagingData
+		checkRelatedJournalStagingData: checkRelatedJournalStagingData,
+		mappingParamDate: mappingParamDate
 	}
 });
